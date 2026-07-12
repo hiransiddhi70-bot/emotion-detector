@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 17: Local Emotion Detector</title>
+    
+    <!-- Load face-api.js directly from CDN -->
+    <script defer src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.3.0/dist/face-api.js"></script>
+
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --accent-color: #3b82f6;
+            --text-color: #f8fafc;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            font-size: 1.5rem;
+            margin-bottom: 5px;
+            color: var(--accent-color);
+        }
+
+        p {
+            font-size: 0.9rem;
+            opacity: 0.8;
+        }
+
+        .container {
+            position: relative;
+            width: 100%;
+            max-width: 400px;
+            aspect-ratio: 4/3;
+            background: var(--card-bg);
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1); /* Mirror effect for natural mobile view */
+        }
+
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            transform: scaleX(-1); /* Mirror canvas to match video */
+            pointer-events: none;
+        }
+
+        .status-box {
+            margin-top: 20px;
+            width: 100%;
+            max-width: 400px;
+            background: var(--card-bg);
+            padding: 15px;
+            border-radius: 12px;
+            text-align: center;
+        }
+
+        #status {
+            font-weight: 600;
+            color: #e2e8f0;
+        }
+
+        #emotion-result {
+            font-size: 2rem;
+            margin-top: 10px;
+            display: block;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            background: #334155;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>AI Emotion Detector</h1>
+        <p>Day 17 of #20day20ai • 100% Client-Side AI</p>
+    </header>
+
+    <div class="container">
+        <video id="video" autoplay muted playsinline></video>
+        <canvas id="canvas"></canvas>
+    </div>
+
+    <div class="status-box">
+        <div id="status">Loading AI Models... Hold tight!</div>
+        <div id="emotion-result">—</div>
+        <span class="badge">Runs offline locally</span>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const statusDiv = document.getElementById('status');
+        const emotionResult = document.getElementById('emotion-result');
+
+        // Emoji mapping for emotions
+        const emotionEmojis = {
+            neutral: "😐 Neutral",
+            happy: "😊 Happy!",
+            sad: "😢 Sad",
+            angry: "😠 Angry",
+            fearful: "😨 Scared",
+            disgusted: "🤢 Disgusted",
+            surprised: "😲 Surprised!"
+        };
+
+        // 1. Initialize and load models from an external open-source weights repository
+        async function init() {
+            try {
+                const MODEL_URL = 'https://justadudewhohacks.github.io/face-api.js/models';
+                
+                statusDiv.innerText = "Downloading weights (~5MB)...";
+                await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+                await faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL);
+                
+                statusDiv.innerText = "Requesting camera access...";
+                startVideo();
+            } catch (err) {
+                statusDiv.innerText = "Initialization failed: " + err.message;
+                console.error(err);
+            }
+        }
+
+        // 2. Start streaming camera feed
+        function startVideo() {
+            navigator.mediaDevices.getUserMedia({ 
+                video: { 
+                    facingMode: "user",
+                    width: { ideal: 640 },
+                    height: { ideal: 480 }
+                } 
+            })
+            .then(stream => {
+                video.srcObject = stream;
+                statusDiv.innerText = "AI System Active! Look at the camera.";
+            })
+            .catch(err => {
+                statusDiv.innerText = "Camera Access Denied. Please grant permissions.";
+                console.error(err);
+            });
+        }
+
+        // 3. Process video frames dynamically once playing
+        video.addEventListener('play', () => {
+            const displaySize = { width: video.offsetWidth, height: video.offsetHeight };
+            faceapi.matchDimensions(canvas, displaySize);
+
+            setInterval(async () => {
+                // Run inference locally using TinyFaceDetector for high frame rates on mobile
+                const detections = await faceapi.detectAllFaces(
+                    video, 
+                    new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 })
+                ).withFaceExpressions();
+
+                // Clear prior canvas sketches
+                const context = canvas.getContext('2d');
+                context.clearRect(0, 0, canvas.width, canvas.height);
+
+                if (detections && detections.length > 0) {
+                    const resizedDetections = faceapi.resizeResults(detections, displaySize);
+                    
+                    // Optional: Remove this line if you don't want the bounding boxes rendered overlaying the video
+                    faceapi.draw.drawDetections(canvas, resizedDetections);
+
+                    // Extract dominant emotion score
+                    const expressions = detections[0].expressions;
+                    const topEmotion = Object.keys(expressions).reduce((a, b) => expressions[a] > expressions[b] ? a : b);
+                    
+                    emotionResult.innerText = emotionEmojis[topEmotion] || topEmotion;
+                } else {
+                    emotionResult.innerText = "🔍 No face detected";
+                }
+            }, 200); // 5 frames per second keeps mobile devices cool and efficient
+        });
+
+        // Trigger startup when script and DOM load
+        window.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>
